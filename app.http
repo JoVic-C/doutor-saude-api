@@ -1,0 +1,60 @@
+POST http://localhost:3000/agendamento/enviar-confirmacao-unitaria
+Content-Type: application/json
+
+{
+    "NumeroCelular": "48984077687" 
+}
+
+
+############
+  
+POST http://localhost:3000/agendamento/listagem-por-data
+Content-Type: application/json
+
+{
+  "DataAgendamento": "2026-04-05T13:35:10.224Z"
+}
+
+############
+  
+POST http://localhost:3000/procedimento/buscar-por-agendamento
+Content-Type: application/json
+
+{
+  "DataAgendamento": "2026-04-05T13:35:10.224Z"
+}
+
+#####
+GET  http://localhost:3000/procedimento/orientacoes?id=10
+
+
+##########
+
+POST http://localhost:3000/paciente/celular
+Content-Type: application/json
+
+{
+    "NumeroCelular": "48984077687" 
+}
+
+
+######
+GET http://localhost:3000/confirmar?codigo=398459&celular=48984077687&nome=PACIENTE TESTE&data=05/04&horario=13:00&prof=TDSA TESTE&proc=USG - ABDOME TOTAL - (NÃO INCLUI PELVE)
+Content-Type: application/json
+
+
+######
+POST http://localhost:3000/agendamento/enviar-confirmacao-unitaria
+Content-Type: application/json
+
+{
+    "NumeroCelular": "48984077687" 
+}
+
+#####
+POST http://localhost:3000/orientacao/enviar-teste
+Content-Type: application/json
+{
+    "celular": "48984077687",
+    "proc": "USG - ABDOME TOTAL - (NÃO INCLUI PELVE)"
+}
