@@ -3,6 +3,7 @@ const config = require("./src/config");
 const realclinic = require("./src/services/realclinic");
 const maischat = require("./src/services/maischat");
 const { buscarTemplateOrientacao } = require("./src/services/sheets");
+const scheduler = require("./src/scheduler");
 const {
   formatarParaRealclinic,
   formatarCelular,
@@ -451,4 +452,35 @@ app.post("/orientacao/enviar", async (req, res) => {
 
 // ─── Inicialização ────────────────────────────────────────────────────────────
 
-app.listen(config.port, () => console.log(`Servidor rodando em http://localhost:${config.port}`));
+app.listen(config.port, () => {
+  console.log(`Servidor rodando em http://localhost:${config.port}`);
+  scheduler.iniciar();
+});
+
+// ─── Rotas: scheduler (disparo manual) ───────────────────────────────────────
+
+/**
+ * POST /scheduler/executar-confirmacoes
+ * Dispara o job de confirmações imediatamente (sem esperar o cron).
+ */
+app.post("/scheduler/executar-confirmacoes", async (_req, res) => {
+  try {
+    const resultado = await scheduler.executarConfirmacoes();
+    return res.status(200).json({ sucesso: true, ...resultado });
+  } catch (error) {
+    return handleError(error, res);
+  }
+});
+
+/**
+ * POST /scheduler/executar-lembretes
+ * Dispara o job de lembretes imediatamente (sem esperar o cron).
+ */
+app.post("/scheduler/executar-lembretes", async (_req, res) => {
+  try {
+    const resultado = await scheduler.executarLembretes();
+    return res.status(200).json({ sucesso: true, ...resultado });
+  } catch (error) {
+    return handleError(error, res);
+  }
+});
