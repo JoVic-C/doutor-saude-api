@@ -4,12 +4,13 @@ const realclinic = require("./services/realclinic");
 const maischat = require("./services/maischat");
 const { formatarCelular, extrairDiaMes } = require("./helpers");
 
-// Template do WhatsApp tem URL base "https://api.../{{1}}", então o parâmetro dinâmico
-// precisa carregar o path (confirmar / cancelar), não apenas a query string.
+// Como o template do WhatsApp já tem a URL base fixa, o parâmetro dinâmico só carrega
+// a query string. A ação (confirmar/cancelar) é diferenciada via &action=... e tratada
+// em GET /.
 function montarUrlParams(action, ag, DataAgendamento) {
   const { Codigo, NomePaciente, NumeroTelefone, NomeProfissional, NomeProcedimento, Horario } = ag;
   const { dia, mes } = extrairDiaMes(DataAgendamento);
-  return `${action}?codigo=${Codigo}&celular=${NumeroTelefone}&nome=${encodeURIComponent(NomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(Horario)}&prof=${encodeURIComponent(NomeProfissional)}&proc=${encodeURIComponent(NomeProcedimento || "")}`;
+  return `?codigo=${Codigo}&celular=${NumeroTelefone}&nome=${encodeURIComponent(NomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(Horario)}&prof=${encodeURIComponent(NomeProfissional)}&proc=${encodeURIComponent(NomeProcedimento || "")}&action=${action}`;
 }
 
 // Calcula "hoje + offsetDias" no fuso configurado e devolve no formato ISO usado pela Realclinic.

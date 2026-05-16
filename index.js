@@ -32,12 +32,13 @@ app.use((req, res, next) => {
 
 // ─── Helpers de Rotas ─────────────────────────────────────────────────────────
 
-// O template do WhatsApp usa URL base "https://api.../{{1}}", então o parâmetro dinâmico
-// precisa começar com o path (confirmar / cancelar), não apenas com "?".
+// Como o template do WhatsApp já tem a URL base fixa, o parâmetro dinâmico só carrega
+// a query string. A ação (confirmar/cancelar) é diferenciada via &action=... e tratada
+// em GET /.
 function montarUrlParams(action, ag) {
   const { Codigo, NomePaciente, NumeroTelefone, NomeProfissional, NomeProcedimento, Horario, DataAgendamento } = ag;
   const { dia, mes } = extrairDiaMes(DataAgendamento);
-  return `${action}?codigo=${Codigo}&celular=${NumeroTelefone}&nome=${encodeURIComponent(NomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(Horario)}&prof=${encodeURIComponent(NomeProfissional)}&proc=${encodeURIComponent(NomeProcedimento || "")}`;
+  return `?codigo=${Codigo}&celular=${NumeroTelefone}&nome=${encodeURIComponent(NomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(Horario)}&prof=${encodeURIComponent(NomeProfissional)}&proc=${encodeURIComponent(NomeProcedimento || "")}&action=${action}`;
 }
 
 // ─── Rotas: básicas ──────────────────────────────────────────────────────────
@@ -144,8 +145,8 @@ app.post("/agendamento/enviar-confirmacao", async (req, res) => {
   const celularDestino  = formatarParaRealclinic(NumeroCelular);
 
   const queryString = `?codigo=${codigo}&celular=${celularDestino}&nome=${encodeURIComponent(nomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(horario)}&prof=${encodeURIComponent(nomeProfissional)}&proc=${encodeURIComponent(nomeProc)}`;
-  const urlParams = `confirmar${queryString}`;
-  const urlParamsCancelar = `cancelar${queryString}`;
+  const urlParams = `${queryString}&action=confirmar`;
+  const urlParamsCancelar = `${queryString}&action=cancelar`;
 
   try {
     const response = await maischat.enviarConfirmacao(destination, {
@@ -367,11 +368,7 @@ app.post("/agendamento/confirmar-e-orientar", async (req, res) => {
 
 // ─── Rotas: confirmação/cancelamento via botão (GET) ─────────────────────────
 
-/**
- * GET /confirmar
- * Chamado pelo botão do template. Confirma + envia orientação.
- */
-app.get("/confirmar", async (req, res) => {
+async function handleConfirmar(req, res) {
   const { codigo, celular, proc, nome, horario, prof, data } = req.query;
 
   if (!codigo || !celular) {
@@ -403,13 +400,9 @@ app.get("/confirmar", async (req, res) => {
   }
 
   return res.send(paginaResposta("✅", "Consulta confirmada!", `Olá, ${nome || "paciente"}! Sua consulta do dia <strong>${data || "--"}</strong> às <strong>${horario || "--"}</strong> com <strong>${prof || "--"}</strong> foi confirmada.<br><br>As orientações foram enviadas para o seu WhatsApp.`, "#0a6e4e"));
-});
+}
 
-/**
- * GET /cancelar
- * Chamado pelo botão cancelar do template.
- */
-app.get("/cancelar", async (req, res) => {
+async function handleCancelar(req, res) {
   const { codigo, nome, horario, prof, data } = req.query;
   console.log(`Cancelamento — Código: ${codigo} | Paciente: ${nome}`);
 
@@ -421,6 +414,30 @@ app.get("/cancelar", async (req, res) => {
   }
 
   return res.send(paginaResposta("❌", "Consulta cancelada.", `Sua consulta do dia <strong>${data || "--"}</strong> às <strong>${horario || "--"}</strong> foi cancelada.<br><br>Entre em contato para reagendar.`, "#c0392b"));
+}
+
+/**
+ * GET /confirmar
+ * Chamado pelo botão do template. Confirma + envia orientação.
+ */
+app.get("/confirmar", handleConfirmar);
+
+/**
+ * GET /cancelar
+ * Chamado pelo botão cancelar do template.
+ */
+app.get("/cancelar", handleCancelar);
+
+/**
+ * GET /
+ * Fallback usado quando o template do WhatsApp aponta para a URL raiz.
+ * O parâmetro ?action=confirmar|cancelar decide o que fazer.
+ */
+app.get("/", async (req, res) => {
+  const { action } = req.query;
+  if (action === "confirmar") return handleConfirmar(req, res);
+  if (action === "cancelar")  return handleCancelar(req, res);
+  return res.send(paginaResposta("⚠️", "Página não encontrada", "Acesse esta página apenas pelo link recebido no WhatsApp.", "#f59e0b"));
 });
 
 // ─── Rotas: orientação ───────────────────────────────────────────────────────
