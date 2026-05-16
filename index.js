@@ -32,10 +32,12 @@ app.use((req, res, next) => {
 
 // ─── Helpers de Rotas ─────────────────────────────────────────────────────────
 
-function montarUrlParams(ag) {
+// O template do WhatsApp usa URL base "https://api.../{{1}}", então o parâmetro dinâmico
+// precisa começar com o path (confirmar / cancelar), não apenas com "?".
+function montarUrlParams(action, ag) {
   const { Codigo, NomePaciente, NumeroTelefone, NomeProfissional, NomeProcedimento, Horario, DataAgendamento } = ag;
   const { dia, mes } = extrairDiaMes(DataAgendamento);
-  return `?codigo=${Codigo}&celular=${NumeroTelefone}&nome=${encodeURIComponent(NomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(Horario)}&prof=${encodeURIComponent(NomeProfissional)}&proc=${encodeURIComponent(NomeProcedimento || "")}`;
+  return `${action}?codigo=${Codigo}&celular=${NumeroTelefone}&nome=${encodeURIComponent(NomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(Horario)}&prof=${encodeURIComponent(NomeProfissional)}&proc=${encodeURIComponent(NomeProcedimento || "")}`;
 }
 
 // ─── Rotas: básicas ──────────────────────────────────────────────────────────
@@ -141,11 +143,13 @@ app.post("/agendamento/enviar-confirmacao", async (req, res) => {
   const codigo          = agendamento.IdAgendamento || "";
   const celularDestino  = formatarParaRealclinic(NumeroCelular);
 
-  const urlParams = `?codigo=${codigo}&celular=${celularDestino}&nome=${encodeURIComponent(nomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(horario)}&prof=${encodeURIComponent(nomeProfissional)}&proc=${encodeURIComponent(nomeProc)}`;
+  const queryString = `?codigo=${codigo}&celular=${celularDestino}&nome=${encodeURIComponent(nomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(horario)}&prof=${encodeURIComponent(nomeProfissional)}&proc=${encodeURIComponent(nomeProc)}`;
+  const urlParams = `confirmar${queryString}`;
+  const urlParamsCancelar = `cancelar${queryString}`;
 
   try {
     const response = await maischat.enviarConfirmacao(destination, {
-      nomePaciente, dia, mes, horario, nomeProfissional, urlParams,
+      nomePaciente, dia, mes, horario, nomeProfissional, urlParams, urlParamsCancelar,
     });
     return res.status(200).json({
       sucesso: true,
@@ -197,8 +201,8 @@ app.post("/agendamento/enviar-confirmacoes", async (req, res) => {
 
       const destination  = formatarCelular(NumeroTelefone);
       const { dia, mes } = extrairDiaMes(DataAg || DataAgendamento);
-      const urlParams    = montarUrlParams({ ...ag, DataAgendamento: DataAg || DataAgendamento });
-      const urlParamsCancelar = urlParams;
+      const urlParams         = montarUrlParams("confirmar", { ...ag, DataAgendamento: DataAg || DataAgendamento });
+      const urlParamsCancelar = montarUrlParams("cancelar", { ...ag, DataAgendamento: DataAg || DataAgendamento });
 
       const resultado = await maischat.enviarConfirmacao(destination, {
         nomePaciente: NomePaciente,

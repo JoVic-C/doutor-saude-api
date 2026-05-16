@@ -4,10 +4,12 @@ const realclinic = require("./services/realclinic");
 const maischat = require("./services/maischat");
 const { formatarCelular, extrairDiaMes } = require("./helpers");
 
-function montarUrlParams(ag, DataAgendamento) {
+// Template do WhatsApp tem URL base "https://api.../{{1}}", então o parâmetro dinâmico
+// precisa carregar o path (confirmar / cancelar), não apenas a query string.
+function montarUrlParams(action, ag, DataAgendamento) {
   const { Codigo, NomePaciente, NumeroTelefone, NomeProfissional, NomeProcedimento, Horario } = ag;
   const { dia, mes } = extrairDiaMes(DataAgendamento);
-  return `?codigo=${Codigo}&celular=${NumeroTelefone}&nome=${encodeURIComponent(NomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(Horario)}&prof=${encodeURIComponent(NomeProfissional)}&proc=${encodeURIComponent(NomeProcedimento || "")}`;
+  return `${action}?codigo=${Codigo}&celular=${NumeroTelefone}&nome=${encodeURIComponent(NomePaciente)}&data=${dia}/${mes}&horario=${encodeURIComponent(Horario)}&prof=${encodeURIComponent(NomeProfissional)}&proc=${encodeURIComponent(NomeProcedimento || "")}`;
 }
 
 // Calcula "hoje + offsetDias" no fuso configurado e devolve no formato ISO usado pela Realclinic.
@@ -60,7 +62,8 @@ async function executarConfirmacoes() {
     try {
       const destination = formatarCelular(NumeroTelefone);
       const { dia, mes } = extrairDiaMes(DataAg || DataAgendamento);
-      const urlParams = montarUrlParams(ag, DataAg || DataAgendamento);
+      const urlParams = montarUrlParams("confirmar", ag, DataAg || DataAgendamento);
+      const urlParamsCancelar = montarUrlParams("cancelar", ag, DataAg || DataAgendamento);
 
       const resultado = await maischat.enviarConfirmacao(destination, {
         nomePaciente: NomePaciente,
@@ -69,7 +72,7 @@ async function executarConfirmacoes() {
         horario: Horario,
         nomeProfissional: NomeProfissional,
         urlParams,
-        urlParamsCancelar: urlParams,
+        urlParamsCancelar,
       });
 
       if (resultado?.data?.data?.status === false) {
