@@ -2,7 +2,7 @@ const express = require("express");
 const config = require("./src/config");
 const realclinic = require("./src/services/realclinic");
 const maischat = require("./src/services/maischat");
-const { buscarTemplateOrientacao } = require("./src/services/sheets");
+const { buscarTemplateOrientacao, buscarOrientacaoTexto } = require("./src/services/sheets");
 const scheduler = require("./src/scheduler");
 const {
   formatarParaRealclinic,
@@ -10,6 +10,7 @@ const {
   extrairDiaMes,
   handleError,
   paginaResposta,
+  dividirTexto,
 } = require("./src/helpers");
 
 const app = express();
@@ -251,10 +252,16 @@ app.post("/agendamento/enviar-lembretes", async (req, res) => {
     return handleError(error, res);
   }
 
-  const confirmados = agendamentos.filter(ag => {
-    const status = (ag.Situacao || ag.Status || "").toString().toLowerCase();
-    return status.includes("confirmad");
-  });
+  // ListagemAgendamentoData não retorna Status; consulta um a um (Status === 4 = confirmado).
+  const confirmados = [];
+  for (const ag of agendamentos) {
+    try {
+      const status = await realclinic.buscarStatusAgendamento(ag.NumeroTelefone, ag.Codigo, formatarParaRealclinic);
+      if (status === 4) confirmados.push(ag);
+    } catch (e) {
+      console.log(`Erro consultando Status do ag ${ag.Codigo}:`, e.message);
+    }
+  }
 
   if (confirmados.length === 0) {
     return res.status(200).json({ sucesso: true, mensagem: "Nenhum agendamento confirmado encontrado.", total: 0, totalEnviados: 0, totalFalhas: 0, enviados: [], falhas: [] });
@@ -382,21 +389,24 @@ async function handleConfirmar(req, res) {
     console.log("Erro ao confirmar:", e.response?.data || e.message);
   }
 
-  let templateName = null;
+  let texto = null;
   try {
-    templateName = await buscarTemplateOrientacao(null, proc);
+    texto = await buscarOrientacaoTexto(null, proc);
   } catch (e) {
-    console.log("Erro ao buscar template da orientação:", e.message);
+    console.log("Erro ao buscar texto da orientação:", e.message);
   }
 
-  if (templateName) {
+  if (texto) {
     try {
       const destination = formatarCelular(celular);
-      await maischat.enviarOrientacaoTemplate(destination, templateName);
-      console.log(`Orientação enviada para ${destination} (template: ${templateName})`);
+      const partes = dividirTexto(texto);
+      await maischat.enviarOrientacaoComTexto(destination, partes);
+      console.log(`Orientação enviada para ${destination} (${texto.length} chars em 3 partes).`);
     } catch (e) {
-      console.log("Erro ao enviar orientação:", e.message);
+      console.log("Erro ao enviar orientação:", e.response?.data || e.message);
     }
+  } else {
+    console.log(`Sem orientação cadastrada na planilha para: ${proc}`);
   }
 
   return res.send(paginaResposta("✅", "Consulta confirmada!", `Olá, ${nome || "paciente"}! Sua consulta do dia <strong>${data || "--"}</strong> às <strong>${horario || "--"}</strong> com <strong>${prof || "--"}</strong> foi confirmada.<br><br>As orientações foram enviadas para o seu WhatsApp.`, "#0a6e4e"));
@@ -469,6 +479,208 @@ app.post("/orientacao/enviar", async (req, res) => {
     console.log("Erro completo MaisChat:", JSON.stringify(error.response?.data, null, 2));
     return handleError(error, res);
   }
+});
+
+/**
+ * POST /orientacao/enviar-texto
+ * Envia o template único (config.templates.orientacao = confirmacao_e_orientacao_v2)
+ * preenchendo as 6 variáveis de body com o texto da coluna "Orientação" da planilha.
+ * Body: { "celular": "48984077687", "proc": "USG - ABDOME TOTAL", "idProc": 16072 }
+ */
+app.post("/orientacao/enviar-texto", async (req, res) => {
+  const { celular, proc, idProc } = req.body;
+  if (!celular) return res.status(400).json({ sucesso: false, mensagem: "O campo 'celular' é obrigatório." });
+  if (!proc && !idProc) return res.status(400).json({ sucesso: false, mensagem: "Informe 'proc' ou 'idProc'." });
+
+  let texto = null;
+  try {
+    texto = await buscarOrientacaoTexto(idProc, proc);
+  } catch (e) {
+    console.log("Erro ao buscar texto da orientação:", e.message);
+  }
+
+  if (!texto) {
+    return res.status(404).json({ sucesso: false, mensagem: "Orientação não encontrada para este procedimento." });
+  }
+
+  const partes = dividirTexto(texto);
+  console.log(`Orientação dividida: ${partes.map((p, i) => `{{${i + 1}}}=${p.length}ch`).join(", ")}`);
+
+  try {
+    const destination = formatarCelular(celular);
+    const response = await maischat.enviarOrientacaoComTexto(destination, partes);
+    return res.status(200).json({
+      sucesso: true,
+      mensagem: "Orientação enviada!",
+      destination,
+      template: config.templates.orientacao,
+      tamanhoTexto: texto.length,
+      msgId: response.data?.data?.msgId,
+    });
+  } catch (error) {
+    console.log("Erro completo MaisChat:", JSON.stringify(error.response?.data, null, 2));
+    return handleError(error, res);
+  }
+});
+
+/**
+ * POST /orientacao/enviar-lote
+ * Lista os agendamentos de uma data e dispara orientação (6 vars) para todos,
+ * sem checar Status. Mais rápido (1 request por agendamento). Use quando quiser
+ * mandar para todos do dia, mesmo quem ainda não confirmou.
+ * Body: { "DataAgendamento": "2026-05-18T00:00:00Z" }
+ */
+app.post("/orientacao/enviar-lote", async (req, res) => {
+  const { DataAgendamento } = req.body;
+  if (!DataAgendamento) return res.status(400).json({ sucesso: false, mensagem: "O campo 'DataAgendamento' é obrigatório." });
+  const data = new Date(DataAgendamento);
+  if (isNaN(data.getTime())) return res.status(400).json({ sucesso: false, mensagem: "Formato de data inválido." });
+
+  let agendamentos = [];
+  try {
+    agendamentos = await realclinic.listarAgendamentosPorData(DataAgendamento);
+  } catch (error) {
+    return handleError(error, res);
+  }
+
+  if (agendamentos.length === 0) {
+    return res.status(200).json({ sucesso: true, total: 0, totalEnviados: 0, totalFalhas: 0, enviados: [], falhas: [] });
+  }
+
+  const enviados = [];
+  const falhas = [];
+
+  for (const ag of agendamentos) {
+    const { Codigo, NomePaciente, NumeroTelefone, NomeProcedimento } = ag;
+
+    if (!NumeroTelefone) {
+      falhas.push({ Codigo, NomePaciente, motivo: "NumeroTelefone não encontrado." });
+      continue;
+    }
+
+    let texto = null;
+    try {
+      texto = await buscarOrientacaoTexto(null, NomeProcedimento);
+    } catch (e) {
+      falhas.push({ Codigo, NomePaciente, motivo: `Erro ao buscar orientação: ${e.message}` });
+      continue;
+    }
+
+    if (!texto) {
+      falhas.push({ Codigo, NomePaciente, motivo: `Sem orientação cadastrada para "${NomeProcedimento}".` });
+      continue;
+    }
+
+    try {
+      const destination = formatarCelular(NumeroTelefone);
+      const partes = dividirTexto(texto);
+      const resultado = await maischat.enviarOrientacaoComTexto(destination, partes);
+      if (resultado?.data?.data?.status === false) {
+        falhas.push({ Codigo, NomePaciente, motivo: resultado.data.data.message });
+      } else {
+        enviados.push({ Codigo, NomePaciente, destination, tamanhoTexto: texto.length, msgId: resultado?.data?.data?.msgId });
+      }
+    } catch (err) {
+      falhas.push({ Codigo, NomePaciente, motivo: err.response?.data?.message || err.message });
+    }
+  }
+
+  return res.status(200).json({
+    sucesso: true,
+    total: agendamentos.length,
+    totalEnviados: enviados.length,
+    totalFalhas: falhas.length,
+    enviados,
+    falhas,
+  });
+});
+
+/**
+ * POST /orientacao/enviar-lote-confirmados
+ * Lista os agendamentos de uma data, filtra os com Status === 4 (confirmados) e dispara
+ * o template de orientação (6 vars) com o texto da planilha para cada um.
+ * Body: { "DataAgendamento": "2026-05-18T00:00:00Z" }
+ */
+app.post("/orientacao/enviar-lote-confirmados", async (req, res) => {
+  const { DataAgendamento } = req.body;
+  if (!DataAgendamento) return res.status(400).json({ sucesso: false, mensagem: "O campo 'DataAgendamento' é obrigatório." });
+  const data = new Date(DataAgendamento);
+  if (isNaN(data.getTime())) return res.status(400).json({ sucesso: false, mensagem: "Formato de data inválido." });
+
+  let agendamentos = [];
+  try {
+    agendamentos = await realclinic.listarAgendamentosPorData(DataAgendamento);
+  } catch (error) {
+    return handleError(error, res);
+  }
+
+  if (agendamentos.length === 0) {
+    return res.status(200).json({ sucesso: true, total: 0, totalConfirmados: 0, totalEnviados: 0, totalFalhas: 0, enviados: [], falhas: [], naoConfirmados: [] });
+  }
+
+  const enviados = [];
+  const falhas = [];
+  const naoConfirmados = [];
+
+  for (const ag of agendamentos) {
+    const { Codigo, NomePaciente, NumeroTelefone, NomeProcedimento } = ag;
+
+    let status = null;
+    try {
+      status = await realclinic.buscarStatusAgendamento(NumeroTelefone, Codigo, formatarParaRealclinic);
+    } catch (e) {
+      falhas.push({ Codigo, NomePaciente, motivo: `Erro ao consultar Status: ${e.response?.data?.message || e.message}` });
+      continue;
+    }
+
+    if (status !== 4) {
+      naoConfirmados.push({ Codigo, NomePaciente, status });
+      continue;
+    }
+
+    if (!NumeroTelefone) {
+      falhas.push({ Codigo, NomePaciente, motivo: "NumeroTelefone não encontrado." });
+      continue;
+    }
+
+    let texto = null;
+    try {
+      texto = await buscarOrientacaoTexto(null, NomeProcedimento);
+    } catch (e) {
+      falhas.push({ Codigo, NomePaciente, motivo: `Erro ao buscar orientação: ${e.message}` });
+      continue;
+    }
+
+    if (!texto) {
+      falhas.push({ Codigo, NomePaciente, motivo: `Sem orientação cadastrada para "${NomeProcedimento}".` });
+      continue;
+    }
+
+    try {
+      const destination = formatarCelular(NumeroTelefone);
+      const partes = dividirTexto(texto);
+      const resultado = await maischat.enviarOrientacaoComTexto(destination, partes);
+      if (resultado?.data?.data?.status === false) {
+        falhas.push({ Codigo, NomePaciente, motivo: resultado.data.data.message });
+      } else {
+        enviados.push({ Codigo, NomePaciente, destination, tamanhoTexto: texto.length, msgId: resultado?.data?.data?.msgId });
+      }
+    } catch (err) {
+      falhas.push({ Codigo, NomePaciente, motivo: err.response?.data?.message || err.message });
+    }
+  }
+
+  return res.status(200).json({
+    sucesso: true,
+    total: agendamentos.length,
+    totalConfirmados: enviados.length + falhas.filter(f => !f.motivo?.startsWith("Erro ao consultar Status")).length,
+    totalEnviados: enviados.length,
+    totalFalhas: falhas.length,
+    totalNaoConfirmados: naoConfirmados.length,
+    enviados,
+    falhas,
+    naoConfirmados,
+  });
 });
 
 // ─── Inicialização ────────────────────────────────────────────────────────────

@@ -37,10 +37,22 @@ async function listarAgendamentosPorData(DataAgendamento) {
   return r.data || [];
 }
 
+// ListagemAgendamentoData não retorna Status; para descobrir, busca o paciente pelo
+// celular, lista seus agendamentos e localiza o item pelo IdAgendamento.
+async function buscarStatusAgendamento(numeroTelefone, idAgendamento, formatarParaRealclinic) {
+  if (!numeroTelefone || !idAgendamento) return null;
+  const paciente = await buscarPacientePorCelular(formatarParaRealclinic(numeroTelefone));
+  if (!paciente?.Id) return null;
+  const agendamentos = await buscarAgendamentosPaciente(paciente.Id);
+  const encontrado = agendamentos.find((a) => Number(a.IdAgendamento) === Number(idAgendamento));
+  return encontrado ? Number(encontrado.Status) : null;
+}
+
 module.exports = {
   buscarPacientePorCelular,
   buscarAgendamentosPaciente,
   confirmarAgendamento,
   cancelarAgendamento,
   listarAgendamentosPorData,
+  buscarStatusAgendamento,
 };

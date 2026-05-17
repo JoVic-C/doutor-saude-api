@@ -2,7 +2,7 @@ const cron = require("node-cron");
 const config = require("./config");
 const realclinic = require("./services/realclinic");
 const maischat = require("./services/maischat");
-const { formatarCelular, extrairDiaMes } = require("./helpers");
+const { formatarCelular, formatarParaRealclinic, extrairDiaMes } = require("./helpers");
 
 // Como o template do WhatsApp já tem a URL base fixa, o parâmetro dinâmico só carrega
 // a query string. A ação (confirmar/cancelar) é diferenciada via &action=... e tratada
@@ -104,15 +104,22 @@ async function executarLembretes() {
     return { enviados: 0, falhas: 0, total: 0 };
   }
 
-  const confirmados = agendamentos.filter((ag) => {
-    const status = (ag.Situacao || ag.Status || "").toString().toLowerCase();
-    return status.includes("confirmad");
-  });
+  // ListagemAgendamentoData não retorna Status; consulta um a um (Status === 4 = confirmado).
+  const confirmados = [];
+  for (const ag of agendamentos) {
+    try {
+      const status = await realclinic.buscarStatusAgendamento(ag.NumeroTelefone, ag.Codigo, formatarParaRealclinic);
+      if (status === 4) confirmados.push(ag);
+    } catch (e) {
+      console.log(`[Scheduler] Erro consultando Status do ag ${ag.Codigo}:`, e.message);
+    }
+  }
 
   if (confirmados.length === 0) {
     console.log("[Scheduler] Nenhum agendamento confirmado para lembrete.");
     return { enviados: 0, falhas: 0, total: 0 };
   }
+  console.log(`[Scheduler] ${confirmados.length}/${agendamentos.length} agendamentos confirmados (Status=4).`);
 
   let enviados = 0;
   let falhas = 0;

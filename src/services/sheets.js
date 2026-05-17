@@ -35,6 +35,25 @@ async function buscarTemplateOrientacao(idProcedimento, nomeProcedimento) {
     .replace(/\.(png|jpg|jpeg|pdf)$/i, "");
 }
 
+// Retorna o texto da coluna "Orientação" da planilha, normalizado e pronto para envio
+// num template do WhatsApp (sem quebras de linha, sem espaços duplos).
+async function buscarOrientacaoTexto(idProcedimento, nomeProcedimento) {
+  const linhas = await carregarPlanilha();
+  const encontrado = linhas.find(row => {
+    const matchId = idProcedimento && String(row["Código"] || "").trim() === String(idProcedimento).trim();
+    const matchNome = nomeProcedimento && (row["Descrição do Procedimento"] || "").toLowerCase().includes(nomeProcedimento.toLowerCase());
+    return matchId || matchNome;
+  });
+  const texto = encontrado?.["Orientação"];
+  if (!texto) return null;
+  return String(texto)
+    .replace(/^\"+|\"+$/g, "")
+    .replace(/\\n/g, "\n")
+    .replace(/\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 setInterval(() => { cache = null; console.log("Cache da planilha limpo."); }, 60 * 60 * 1000);
 
-module.exports = { carregarPlanilha, buscarTemplateOrientacao };
+module.exports = { carregarPlanilha, buscarTemplateOrientacao, buscarOrientacaoTexto };

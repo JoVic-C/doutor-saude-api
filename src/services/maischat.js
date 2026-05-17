@@ -58,6 +58,23 @@ async function enviarOrientacaoTemplate(destination, templateName) {
   });
 }
 
+// Envia o template único de orientação (config.templates.orientacao) com o texto da
+// planilha dividido em 3 variáveis de body — formato esperado pelo template
+// confirmacao_e_orientacao_v2.
+async function enviarOrientacaoComTexto(destination, partes) {
+  return enviarTemplate({
+    ...payloadBase(destination),
+    template: {
+      name: config.templates.orientacao,
+      language: config.templates.language,
+      components: [{
+        type: "body",
+        parameters: partes.map((p) => ({ type: "text", text: p })),
+      }],
+    },
+  });
+}
+
 async function enviarLembrete(destination, { nomePaciente, dataFormatada, horario, nomeProfissional }) {
   return enviarTemplate({
     ...payloadBase(destination),
@@ -77,4 +94,4 @@ async function enviarLembrete(destination, { nomePaciente, dataFormatada, horari
   });
 }
 
-module.exports = { enviarTemplate, enviarConfirmacao, enviarOrientacaoTemplate, enviarLembrete };
+module.exports = { enviarTemplate, enviarConfirmacao, enviarOrientacaoTemplate, enviarOrientacaoComTexto, enviarLembrete };
