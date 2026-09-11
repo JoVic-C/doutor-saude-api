@@ -39,7 +39,7 @@ module.exports = {
     enabled: process.env.SCHEDULER_ENABLED !== "false",
     cron: process.env.SCHEDULER_CRON || "0 9 * * *",
     timezone: process.env.SCHEDULER_TIMEZONE || "America/Sao_Paulo",
-    diasConfirmacao: Number(process.env.SCHEDULER_DIAS_CONFIRMACAO) || 3,
-    diasLembrete: Number(process.env.SCHEDULER_DIAS_LEMBRETE) || 1,
+    diasConfirmacao: Number(process.env.SCHEDULER_DIAS_CONFIRMACAO) || 1,
+    diasLembrete: Number(process.env.SCHEDULER_DIAS_LEMBRETE) || 3,
   },
 };

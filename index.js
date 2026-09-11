@@ -230,7 +230,8 @@ app.post("/agendamento/enviar-confirmacoes", async (req, res) => {
 
 /**
  * POST /agendamento/enviar-lembretes
- * Envia template de lembrete em lote para todos os agendamentos *confirmados* de uma data.
+ * Envia template de lembrete em lote para todos os agendamentos de uma data
+ * (o lembrete sai antes da confirmação, então não filtra por Status).
  * Body: { "DataAgendamento": "2026-04-17T00:00:00Z" }
  */
 app.post("/agendamento/enviar-lembretes", async (req, res) => {
@@ -252,25 +253,14 @@ app.post("/agendamento/enviar-lembretes", async (req, res) => {
     return handleError(error, res);
   }
 
-  // ListagemAgendamentoData não retorna Status; consulta um a um (Status === 4 = confirmado).
-  const confirmados = [];
-  for (const ag of agendamentos) {
-    try {
-      const status = await realclinic.buscarStatusAgendamento(ag.NumeroTelefone, ag.Codigo, formatarParaRealclinic);
-      if (status === 4) confirmados.push(ag);
-    } catch (e) {
-      console.log(`Erro consultando Status do ag ${ag.Codigo}:`, e.message);
-    }
-  }
-
-  if (confirmados.length === 0) {
-    return res.status(200).json({ sucesso: true, mensagem: "Nenhum agendamento confirmado encontrado.", total: 0, totalEnviados: 0, totalFalhas: 0, enviados: [], falhas: [] });
+  if (agendamentos.length === 0) {
+    return res.status(200).json({ sucesso: true, mensagem: "Nenhum agendamento encontrado.", total: 0, totalEnviados: 0, totalFalhas: 0, enviados: [], falhas: [] });
   }
 
   const enviados = [];
   const falhas = [];
 
-  for (const ag of confirmados) {
+  for (const ag of agendamentos) {
     const { NomePaciente, Horario, NomeProfissional, DataAgendamento: DataAg, Codigo, NumeroTelefone } = ag;
     try {
       if (!NumeroTelefone) { falhas.push({ Codigo, NomePaciente, motivo: "NumeroTelefone não encontrado." }); continue; }
@@ -295,7 +285,7 @@ app.post("/agendamento/enviar-lembretes", async (req, res) => {
     }
   }
 
-  return res.status(200).json({ sucesso: true, total: confirmados.length, totalEnviados: enviados.length, totalFalhas: falhas.length, enviados, falhas });
+  return res.status(200).json({ sucesso: true, total: agendamentos.length, totalEnviados: enviados.length, totalFalhas: falhas.length, enviados, falhas });
 });
 
 /**
